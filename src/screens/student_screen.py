@@ -4,6 +4,7 @@ from src.ui.base_layout import style_background_dashboard, style_base_layout
 
 from src.components.header import header_dashboard
 from src.components.subject_card import subject_card
+from src.ui.navigation import navigate_to
 
 def student_dashboard():
     from src.database.db import (
@@ -125,9 +126,8 @@ def student_screen():
         header_dashboard()
     with c2:
         if st.button("Go back to Home", type='secondary', key='loginbackbtn', shortcut="control+backspace"):
-            st.session_state['login_type'] = None
             st.session_state['show_student_registration'] = False
-            st.rerun()
+            navigate_to('home')
 
     st.header('Login using FaceID', text_alignment='center')
     st.space()

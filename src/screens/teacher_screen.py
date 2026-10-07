@@ -4,6 +4,7 @@ from src.ui.base_layout import style_background_dashboard, style_base_layout
 
 from src.components.header import header_dashboard
 from src.components.subject_card import subject_card
+from src.ui.navigation import navigate_to
 
 
 def teacher_screen():
@@ -436,8 +437,7 @@ def teacher_screen_login():
         header_dashboard()
     with c2:
         if st.button("Go back to Home", type='secondary', key='loginbackbtn', shortcut="control+backspace"):
-            st.session_state['login_type'] = None
-            st.rerun()
+            navigate_to('home')
 
     st.header('Login using password', text_alignment='center')
     st.space()
@@ -490,8 +490,7 @@ def teacher_screen_register():
         header_dashboard()
     with c2:
         if st.button("Go back to Home", type='secondary', key='loginbackbtn', shortcut="control+backspace"):
-            st.session_state['login_type'] = None
-            st.rerun()
+            navigate_to('home')
 
 
 

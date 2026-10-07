@@ -1,6 +1,9 @@
 import streamlit as st
 from src.components.header import header_home
 from src.ui.base_layout import style_base_layout, style_background_home
+from src.ui.navigation import navigate_to
+
+
 def home_screen():
 
 
@@ -19,8 +22,7 @@ def home_screen():
             unsafe_allow_html=True,
         )
         if st.button('Student Portal', type='primary', icon=':material/arrow_outward:', icon_position='right'):
-            st.session_state['login_type']='student'
-            st.rerun()
+            navigate_to('student')
 
     with col2:
         st.header("I'm Teacher")
@@ -30,5 +32,4 @@ def home_screen():
             unsafe_allow_html=True,
         )
         if st.button('Teacher Portal', type='primary', icon=':material/arrow_outward:', icon_position='right'):
-            st.session_state['login_type']='teacher'
-            st.rerun()
+            navigate_to('teacher')

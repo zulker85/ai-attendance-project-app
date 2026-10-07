@@ -3,6 +3,12 @@ from src.database.db import enroll_student_to_subject
 from src.database.config import supabase
 
 
+def _close_invite():
+    st.query_params["page"] = "student"
+    st.query_params.pop("join-code", None)
+    st.rerun()
+
+
 @st.dialog("Quick Enrollment")
 def auto_enroll_dialog(subject_code):
     student_id = st.session_state.student_data['student_id']
@@ -12,8 +18,7 @@ def auto_enroll_dialog(subject_code):
     if not res.data:
         st.error('Subject Code not found!')
         if st.button('Close'):
-            st.query_params.clear()
-            st.rerun()
+            _close_invite()
         return
     subject = res.data[0]
 
@@ -21,8 +26,7 @@ def auto_enroll_dialog(subject_code):
     if check.data:
         st.info('Youre already enrolled!')
         if st.button('Got it!'):
-            st.query_params.clear()
-            st.rerun()
+            _close_invite()
         return
     st.markdown(f'Would you like to enroll in **{subject['name']}**?')
 
@@ -30,11 +34,9 @@ def auto_enroll_dialog(subject_code):
 
     with col1:
         if st.button('No thanks'):
-            st.query_params.clear()
-            st.rerun()
+            _close_invite()
     with col2:
         if st.button('Yes enroll now!', type='primary', width='stretch'):
             enroll_student_to_subject(student_id, subject['subject_id'])
             st.success('Joined succesfully!')
-            st.query_params.clear()
-            st.rerun()
+            _close_invite()

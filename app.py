@@ -11,7 +11,12 @@ def main():
     if 'login_type' not in st.session_state:
         st.session_state['login_type'] = None
 
-    match st.session_state['login_type']:
+    page = st.query_params.get('page')
+    if page not in ('home', 'student', 'teacher'):
+        page = 'student' if st.query_params.get('join-code') else 'home'
+    st.session_state['login_type'] = None if page == 'home' else page
+
+    match page:
         case 'teacher':
             from src.screens.teacher_screen import teacher_screen
 
@@ -22,17 +27,19 @@ def main():
 
             student_screen()
         
-        case None:
+        case 'home':
             home_screen()
 
-
     join_code = st.query_params.get('join-code')
-    if join_code:
-        if st.session_state.login_type != 'student':
-            st.session_state.login_type = 'student'
-            st.rerun()
-        if st.session_state.get('is_logged_in') and st.session_state.get('user_role') == 'student':
-            from src.components.dialog_auto_enroll import auto_enroll_dialog
+    if (
+        join_code
+        and page == 'student'
+        and st.session_state.get('is_logged_in')
+        and st.session_state.get('user_role') == 'student'
+    ):
+        from src.components.dialog_auto_enroll import auto_enroll_dialog
 
-            auto_enroll_dialog(join_code)
+        auto_enroll_dialog(join_code)
+
+
 main()
