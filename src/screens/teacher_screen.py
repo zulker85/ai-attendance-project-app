@@ -3,25 +3,9 @@ import streamlit as st
 from src.ui.base_layout import style_background_dashboard, style_base_layout
 
 from src.components.header import header_dashboard
-from src.components.footer import footer_dashboard
 from src.components.subject_card import subject_card
-from src.database.db import check_teacher_exists, create_teacher, teacher_login, get_teacher_subjects, get_attendance_for_teacher
-from src.components.dialog_create_subject import create_subject_dialog
-from src.components.dialog_share_subject import share_subject_dialog
-from src.components.dialog_add_photo import add_photos_dialog
-
-from src.pipelines.face_pipeline import predict_attendance
-from src.components.dialog_attendance_results import attendance_result_dialog
-import numpy as np
-
-from datetime import datetime
-
-import pandas as pd
-
-from src.database.config import supabase
 
 
-from src.components.dialog_voice_attendance import voice_attendance_dialog
 def teacher_screen():
 
     style_background_dashboard()
@@ -55,7 +39,7 @@ def teacher_dashboard():
 
     if "current_teacher_tab" not in st.session_state:
         st.session_state.current_teacher_tab = 'take_attendance'
-    tab1, tab2, tab3 = st.columns(3)
+    tab1, tab2, tab3, tab4 = st.columns(4)
 
 
     with tab1:
@@ -76,6 +60,12 @@ def teacher_dashboard():
             st.session_state.current_teacher_tab = 'attendance_records'
             st.rerun()
 
+    with tab4:
+        type4 = "primary" if st.session_state.current_teacher_tab == 'voice_reviews' else "tertiary"
+        if st.button('Voice Reviews', type=type4, width='stretch', icon=':material/mic:'):
+            st.session_state.current_teacher_tab = 'voice_reviews'
+            st.rerun()
+
 
     st.divider()
 
@@ -85,13 +75,16 @@ def teacher_dashboard():
         teacher_tab_manage_subjects()
     if st.session_state.current_teacher_tab == "attendance_records":
         teacher_tab_attendance_records()
+    if st.session_state.current_teacher_tab == "voice_reviews":
+        teacher_tab_voice_reviews()
 
     
 
 
-    footer_dashboard()
 
 def teacher_tab_take_attendance():
+    from src.database.db import get_teacher_subjects
+
     teacher_id = st.session_state.teacher_data['teacher_id']
     st.header('Take AI Attendance')
 
@@ -114,6 +107,8 @@ def teacher_tab_take_attendance():
 
     with col2:
         if st.button('Add Photos', type='primary', icon=':material/photo_prints:', width='stretch'):
+            from src.components.dialog_add_photo import add_photos_dialog
+
             add_photos_dialog()
 
     selected_subject_id = subject_options[selected_subject_label]
@@ -128,7 +123,7 @@ def teacher_tab_take_attendance():
             with gallery_cols[idx % 4 ]:
                 st.image(img, width='stretch', caption=f'Photo {idx+1}')
     has_photos = bool(st.session_state.attendance_images)
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
 
     with c1:
         if st.button('Clear all photos', width='stretch', type='tertiary', icon=':material/delete:', disabled=not has_photos):
@@ -140,6 +135,15 @@ def teacher_tab_take_attendance():
         
         if st.button('Run Face Analysis', width='stretch', type='secondary', icon=':material/analytics:', disabled=not has_photos):
             with st.spinner('Deep scanning classroom photos...'):
+                from datetime import datetime
+
+                import numpy as np
+                import pandas as pd
+
+                from src.components.dialog_attendance_results import attendance_result_dialog
+                from src.database.config import supabase
+                from src.pipelines.face_pipeline import predict_attendance
+
                 all_detected_ids = {}
 
                 for idx, img in enumerate(st.session_state.attendance_images):
@@ -186,21 +190,9 @@ def teacher_tab_take_attendance():
 
                 attendance_result_dialog(pd.DataFrame(results), attendance_to_log)
 
-    with c3:
-        if st.button('Use Voice Attendance', type='primary', width='stretch', icon=':material/mic:'):
-            voice_attendance_dialog(selected_subject_id)
-
-
-
-
-
-
-
-
-
-
-
 def teacher_tab_manage_subjects():
+    from src.database.db import get_teacher_subjects
+
     teacher_id = st.session_state.teacher_data['teacher_id']
     col1, col2 = st.columns(2)
     with col1:
@@ -208,6 +200,8 @@ def teacher_tab_manage_subjects():
 
     with col2:
         if st.button('Create New Subject', width='stretch'):
+            from src.components.dialog_create_subject import create_subject_dialog
+
             create_subject_dialog(teacher_id)
 
 
@@ -221,6 +215,8 @@ def teacher_tab_manage_subjects():
             ]
         def share_btn():
             if st.button(f"Share Code: {sub['name']}", key=f"share_{sub['subject_code']}", icon=":material/share:"):
+                from src.components.dialog_share_subject import share_subject_dialog
+
                 share_subject_dialog(sub['name'], sub['subject_code'])
             st.space()
 
@@ -236,12 +232,17 @@ def teacher_tab_manage_subjects():
 
 
 def teacher_tab_attendance_records():
+    from datetime import datetime
+
+    import pandas as pd
+
+    from src.database.db import get_attendance_for_teacher
+
     st.header('Attendance Records')
 
     teacher_id = st.session_state.teacher_data['teacher_id']
 
     records = get_attendance_for_teacher(teacher_id)
-
     if not records:
         return
     
@@ -249,19 +250,72 @@ def teacher_tab_attendance_records():
 
     for r in records:
         ts = r.get('timestamp')
+        parsed_ts = (
+            datetime.fromisoformat(ts.replace('Z', '+00:00'))
+            if ts
+            else None
+        )
+        subject = r['subjects']
+        student = r.get('students') or {}
 
         data.append({
-            "ts_group": ts.split(".")[0] if ts else None,
-            "Time": datetime.fromisoformat(ts).strftime("%Y-%m-%d %I:%M %p") if ts else "N'A",
-            "Subject": r['subjects']['name'],
-            "Subject Code":r['subjects']['subject_code'],
+            "ts_group": parsed_ts.replace(microsecond=0).isoformat() if parsed_ts else None,
+            "Time": parsed_ts.strftime("%Y-%m-%d %I:%M %p") if parsed_ts else "N'A",
+            "Subject ID": subject['subject_id'],
+            "Subject": subject['name'],
+            "Subject Code": subject['subject_code'],
+            "Student ID": r['student_id'],
+            "Name": student.get('name', 'Unknown'),
             "is_present": bool(r.get('is_present', False))
         })
 
-
     df = pd.DataFrame(data)
 
+    detail_df = df.drop_duplicates(
+        subset=['Subject ID', 'ts_group', 'Student ID'],
+        keep='last',
+    ).copy()
+    sessions = (
+        detail_df[['Subject ID', 'Student ID', 'ts_group']]
+        .drop_duplicates()
+        .sort_values(['Subject ID', 'Student ID', 'ts_group'])
+    )
+    sessions['Classes Held (through this class)'] = (
+        sessions.groupby(['Subject ID', 'Student ID']).cumcount() + 1
+    )
+    detail_df = detail_df.merge(
+        sessions,
+        on=['Subject ID', 'Student ID', 'ts_group'],
+        how='left',
+    )
+    detail_df = detail_df.sort_values(
+        ['Subject ID', 'ts_group', 'Student ID']
+    )
+    detail_df['Classes Attended (through this class)'] = (
+        detail_df.groupby(['Subject ID', 'Student ID'])['is_present'].cumsum()
+    )
+    detail_df['Attendance'] = detail_df['is_present'].map(
+        {True: 'Present', False: 'Absent'}
+    )
+    csv_df = detail_df[
+        [
+            'Time',
+            'Subject',
+            'Subject Code',
+            'Name',
+            'Student ID',
+            'Attendance',
+            'Classes Attended (through this class)',
+            'Classes Held (through this class)',
+        ]
+    ]
 
+    st.download_button(
+        'Download detailed attendance CSV',
+        data=csv_df.to_csv(index=False).encode('utf-8-sig'),
+        file_name='attendance_records.csv',
+        mime='text/csv',
+    )
 
     summary = (
         df.groupby(['ts_group', 'Time', 'Subject', 'Subject Code'])
@@ -284,7 +338,85 @@ def teacher_tab_attendance_records():
     st.dataframe(display_df, width='stretch', hide_index=True)
 
 
+def teacher_tab_voice_reviews():
+    from src.database.db import (
+        get_pending_voice_attendance_for_subjects,
+        get_teacher_subjects,
+        review_voice_attendance,
+    )
+
+    teacher_id = st.session_state.teacher_data['teacher_id']
+    subjects = get_teacher_subjects(teacher_id)
+    subject_ids = [subject['subject_id'] for subject in subjects]
+
+    st.header('Pending Voice Attendance')
+    submissions = get_pending_voice_attendance_for_subjects(subject_ids)
+    if not submissions:
+        st.info('There are no voice attendance requests waiting for review.')
+        return
+
+    for submission in submissions:
+        with st.container(border=True):
+            st.subheader(submission['student_name'])
+            st.write(
+                f"{submission['subject_name']} ({submission['subject_code']})"
+            )
+            st.caption(
+                f"Submitted: {submission['submitted_at']} · "
+                f"Voice match: {submission['voice_match_score']:.1%}"
+            )
+            location_url = (
+                "https://www.google.com/maps/search/?api=1&query="
+                f"{submission['latitude']},{submission['longitude']}"
+            )
+            st.markdown(f"[View submitted GPS location]({location_url})")
+            if submission.get('location_accuracy_m') is not None:
+                st.caption(
+                    f"Reported GPS accuracy: {submission['location_accuracy_m']} m"
+                )
+
+            approve_col, reject_col = st.columns(2)
+            with approve_col:
+                if st.button(
+                    'Approve',
+                    key=f"approve_voice_{submission['submission_id']}",
+                    type='primary',
+                    width='stretch',
+                ):
+                    try:
+                        review_voice_attendance(
+                            submission['submission_id'],
+                            teacher_id,
+                            approved=True,
+                        )
+                    except ValueError as error:
+                        st.warning(str(error))
+                    else:
+                        st.success('Attendance approved.')
+                        st.rerun()
+            with reject_col:
+                if st.button(
+                    'Reject',
+                    key=f"reject_voice_{submission['submission_id']}",
+                    type='secondary',
+                    width='stretch',
+                ):
+                    try:
+                        review_voice_attendance(
+                            submission['submission_id'],
+                            teacher_id,
+                            approved=False,
+                        )
+                    except ValueError as error:
+                        st.warning(str(error))
+                    else:
+                        st.success('Attendance rejected.')
+                        st.rerun()
+
+
 def login_teacher(username, password):
+    from src.database.db import teacher_login
+
     if not username or not password:
         return False
     
@@ -324,8 +456,6 @@ def teacher_screen_login():
         if st.button('Login', icon=':material/passkey:', shortcut='control+enter', width='stretch'):
             if login_teacher(teacher_username, teacher_pass):
                 st.toast("welcome back!", icon="👋")
-                import time
-                time.sleep(1)
                 st.rerun()
             else:
                 st.error("Invalid username and password combo")
@@ -334,11 +464,12 @@ def teacher_screen_login():
         if st.button('Register Instead', type="primary", icon=':material/passkey:', width='stretch'):
             st.session_state.teacher_login_type = 'register'
 
-    footer_dashboard()
 
 
 
 def register_teacher(teacher_username, teacher_name, teacher_pass, teacher_pass_confirm):
+    from src.database.db import check_teacher_exists, create_teacher
+
     if not teacher_username or not teacher_name or not teacher_pass:
         return False, "All Fields are required!"
     if check_teacher_exists(teacher_username):
@@ -387,8 +518,6 @@ def teacher_screen_register():
             success, message = register_teacher(teacher_username, teacher_name, teacher_pass, teacher_pass_confirm)
             if success:
                 st.success(message)
-                import time
-                time.sleep(2)
                 st.session_state.teacher_login_type = "login"
                 st.rerun()
             else:
@@ -398,5 +527,3 @@ def teacher_screen_register():
     with btnc2:
         if st.button('Login Instead', type="primary", icon=':material/passkey:', width='stretch'):
             st.session_state.teacher_login_type = 'login'
-
-    footer_dashboard()

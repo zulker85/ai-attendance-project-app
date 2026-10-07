@@ -43,6 +43,19 @@ def create_student(new_name, face_embedding=None, voice_embedding=None):
     return response.data
 
 
+def save_student_voice_profile(student_id, voice_embedding):
+    response = (
+        supabase.table('students')
+        .update({'voice_embedding': voice_embedding})
+        .eq('student_id', student_id)
+        .select('*')
+        .execute()
+    )
+    if not response.data:
+        raise ValueError('Could not save the voice profile for this student.')
+    return response.data[0]
+
+
 def create_subject(subject_code, name, section, teacher_id):
     data = {"subject_code": subject_code, "name": name, "section": section, "teacher_id": teacher_id}
     response = supabase.table("subjects").insert(data).execute()
@@ -93,6 +106,78 @@ def create_attendance(logs):
     return response.data
 
 def get_attendance_for_teacher(teacher_id):
-    response = supabase.table('attendance_logs').select("*, subjects!inner(*)").eq('subjects.teacher_id', teacher_id).execute()
+    response = (
+        supabase.table('attendance_logs')
+        .select("*, subjects!inner(*), students(name)")
+        .eq('subjects.teacher_id', teacher_id)
+        .execute()
+    )
     return response.data
 
+
+def get_student_voice_attendance(student_id):
+    response = (
+        supabase.table('voice_attendance_submissions')
+        .select('*')
+        .eq('student_id', student_id)
+        .order('submitted_at', desc=True)
+        .execute()
+    )
+    return response.data
+
+
+def get_pending_voice_attendance_for_subjects(subject_ids):
+    if not subject_ids:
+        return []
+
+    response = (
+        supabase.table('voice_attendance_submissions')
+        .select('*')
+        .in_('subject_id', subject_ids)
+        .eq('status', 'pending')
+        .order('submitted_at', desc=True)
+        .execute()
+    )
+    return response.data
+
+
+def submit_voice_attendance(
+    student_id,
+    student_name,
+    subject_id,
+    subject_name,
+    subject_code,
+    voice_match_score,
+    latitude,
+    longitude,
+    location_accuracy_m,
+):
+    response = supabase.rpc(
+        'submit_voice_attendance',
+        {
+            'p_student_id': student_id,
+            'p_student_name': student_name,
+            'p_subject_id': subject_id,
+            'p_subject_name': subject_name,
+            'p_subject_code': subject_code,
+            'p_voice_match_score': voice_match_score,
+            'p_latitude': latitude,
+            'p_longitude': longitude,
+            'p_location_accuracy_m': location_accuracy_m,
+        },
+    ).execute()
+    return response.data
+
+
+def review_voice_attendance(submission_id, teacher_id, approved):
+    response = supabase.rpc(
+        'review_voice_attendance',
+        {
+            'p_submission_id': submission_id,
+            'p_teacher_id': teacher_id,
+            'p_approved': approved,
+        },
+    ).execute()
+    if not response.data:
+        raise ValueError('This request was already reviewed or is not in your classes.')
+    return response.data

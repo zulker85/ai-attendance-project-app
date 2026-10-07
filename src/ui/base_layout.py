@@ -16,6 +16,10 @@ def style_background_home():
                     padding:2.5rem !important;
                     border-radius: 5rem !important;
                     }
+
+                .stApp div[data-testid="stColumn"] h2 {
+                    color: #000 !important;
+                }
         </style>  
 
                 """
@@ -29,8 +33,14 @@ def style_background_dashboard():
 
                 .stApp {
                     background: #E0E3FF !important;
+                    color: #000 !important;
                 }
 
+                .stApp h1,
+                .stApp h2,
+                .stApp [data-testid="stSpinner"] p {
+                    color: #000 !important;
+                }
         </style>  
 
                 """
@@ -52,7 +62,18 @@ def style_base_layout():
             #MainMenu, footer, header {
                 visibility: hidden;
             }
-                
+
+            [data-testid="stExpander"] details[open] > summary,
+            [data-testid="stExpander"] details[open] [data-testid="stExpanderDetails"] {
+                background-color: #fff !important;
+                color: #000 !important;
+            }
+
+            [data-testid="stExpander"] details[open] > summary [data-testid="stMarkdownContainer"],
+            [data-testid="stExpander"] details[open] > summary [data-testid="stMarkdownContainer"] * {
+                color: #000 !important;
+            }
+
             .block-container {
                 padding-top:1.5rem !important;    
             }

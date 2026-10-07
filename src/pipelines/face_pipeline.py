@@ -3,7 +3,7 @@
 import dlib
 import numpy as np
 import face_recognition_models
-from sklearn.svm import SVC
+from PIL import Image
 import streamlit as st
 
 from src.database.db import get_all_students
@@ -26,82 +26,102 @@ def load_dlib_models():
 
 def get_face_embeddings(image_np):
     detector, sp, facerec = load_dlib_models()
-    faces = detector(image_np, 1)
+    height, width = image_np.shape[:2]
+    max_dimension = max(height, width)
+    if max_dimension > 800:
+        scale = 800 / max_dimension
+        image_np = np.asarray(
+            Image.fromarray(image_np).resize(
+                (int(width * scale), int(height * scale)),
+                Image.BOX,
+            )
+        )
+
+    faces = detector(image_np, 0)
+    if len(faces) == 0:
+        faces = detector(image_np, 1)
 
     encodings= []
 
     for face in faces:
         shape = sp(image_np, face)
-        face_descriptor = facerec.compute_face_descriptor(image_np, shape, 1) #128 embedding
+        face_descriptor = facerec.compute_face_descriptor(image_np, shape, 0)
 
         encodings.append(np.array(face_descriptor))
     return encodings
 
-@st.cache_resource
+@st.cache_resource(ttl=5)
 def get_trained_model():
-    X = []
-    y = []
+    students = get_all_students()
 
-
-    student_db = get_all_students()
-
-    if not student_db:
+    if not students:
         return None
-    
-    for student in student_db:
+
+    embeddings = []
+    student_ids = []
+    students_by_id = {}
+
+    for student in students:
         embedding = student.get('face_embedding')
         if embedding:
-            X.append(np.array(embedding))
-            y.append(student.get('student_id'))
+            student_id = student.get('student_id')
+            embeddings.append(np.asarray(embedding, dtype=np.float64))
+            student_ids.append(student_id)
+            students_by_id[student_id] = student
 
-    if len(X) ==0:
-        return 0
-    
-    clf = SVC(kernel='linear', probability=True, class_weight='balanced')
+    if not embeddings:
+        return None
 
-    try:
-        clf.fit(X, y)
-    except ValueError:
-        pass
-
-    return {'clf': clf, 'X':X, "y":y}
+    return {
+        'embeddings': np.vstack(embeddings),
+        'student_ids': student_ids,
+        'students_by_id': students_by_id,
+    }
 
 
 def train_classifier():
-    st.cache_resource.clear()
+    get_trained_model.clear()
     model_data = get_trained_model()
     return bool(model_data)
 
 def predict_attendance(class_image_np):
     encodings = get_face_embeddings(class_image_np)
-
     detected_student = {}
-
-
     model_data = get_trained_model()
 
     if not model_data:
         return detected_student, [], len(encodings)
-    
-    clf = model_data['clf']
-    X_train = model_data['X']
-    y_train = model_data['y']
-
-    all_students = sorted(list(set(y_train)))
 
     for encoding in encodings:
-        if len(all_students)>= 2:
-            predicted_id= int(clf.predict([encoding])[0])
-        else:
-            predicted_id = int(all_students[0])
+        distances = np.linalg.norm(
+            model_data['embeddings'] - encoding,
+            axis=1,
+        )
+        best_index = int(np.argmin(distances))
+        if distances[best_index] <= 0.6:
+            detected_student[int(model_data['student_ids'][best_index])] = True
 
-        student_embedding = X_train[y_train.index(predicted_id)]
+    return (
+        detected_student,
+        sorted(set(model_data['student_ids'])),
+        len(encodings),
+    )
 
-        best_match_score = np.linalg.norm(student_embedding - encoding)
 
-        resemblance_threshold = 0.6
+def identify_student(image_np):
+    encodings = get_face_embeddings(image_np)
+    if len(encodings) != 1:
+        return None, len(encodings)
 
-        if best_match_score <= resemblance_threshold:
-            detected_student[predicted_id] = True
-    return detected_student, all_students, len(encodings)
+    model_data = get_trained_model()
+    if not model_data:
+        return None, len(encodings)
 
+    encoding = encodings[0]
+    distances = np.linalg.norm(model_data['embeddings'] - encoding, axis=1)
+    best_index = int(np.argmin(distances))
+    if distances[best_index] > 0.6:
+        return None, len(encodings)
+
+    student_id = model_data['student_ids'][best_index]
+    return model_data['students_by_id'][student_id], len(encodings)

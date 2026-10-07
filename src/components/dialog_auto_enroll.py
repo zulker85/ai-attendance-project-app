@@ -2,8 +2,6 @@ import streamlit as st
 from src.database.db import enroll_student_to_subject
 from src.database.config import supabase
 
-import time
-
 
 @st.dialog("Quick Enrollment")
 def auto_enroll_dialog(subject_code):
@@ -39,6 +37,4 @@ def auto_enroll_dialog(subject_code):
             enroll_student_to_subject(student_id, subject['subject_id'])
             st.success('Joined succesfully!')
             st.query_params.clear()
-            time.sleep(2)
             st.rerun()
-

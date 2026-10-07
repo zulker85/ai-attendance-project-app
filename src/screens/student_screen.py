@@ -3,18 +3,16 @@ import streamlit as st
 from src.ui.base_layout import style_background_dashboard, style_base_layout
 
 from src.components.header import header_dashboard
-from src.components.footer import footer_dashboard
-from PIL import Image
-import numpy as np
-from src.pipelines.face_pipeline import predict_attendance, get_face_embeddings, train_classifier
-from src.pipelines.voice_pipeline import get_voice_embedding
-from src.database.db import get_all_students, create_student, get_student_subjects, get_student_attendance, unenroll_student_to_subject
-import time
-
-from src.components.dialog_enroll import enroll_dialog
 from src.components.subject_card import subject_card
 
 def student_dashboard():
+    from src.database.db import (
+        get_student_subjects,
+        get_student_attendance,
+        get_student_voice_attendance,
+        unenroll_student_to_subject,
+    )
+
     student_data = st.session_state.student_data
     student_id = student_data['student_id']
     c1, c2 = st.columns(2, vertical_alignment='center', gap='xxlarge')
@@ -35,6 +33,8 @@ def student_dashboard():
         st.header('Your Enrolled Subjects')
     with c2:
         if st.button('Enroll in Subject', type='primary', width='stretch'):
+            from src.components.dialog_enroll import enroll_dialog
+
             enroll_dialog()
 
 
@@ -44,6 +44,7 @@ def student_dashboard():
     with st.spinner('Loading your enrolled subjects..'):
         subjects = get_student_subjects(student_id)
         logs = get_student_attendance(student_id)
+        voice_submissions = get_student_voice_attendance(student_id)
 
     stats_map = {}
 
@@ -58,6 +59,9 @@ def student_dashboard():
         if log.get('is_present'):
             stats_map[sid]['attended'] += 1
 
+    submissions_by_subject = {}
+    for submission in voice_submissions:
+        submissions_by_subject.setdefault(submission['subject_id'], []).append(submission)
 
     cols = st.columns(2)
     for i, sub_node in enumerate(subjects):
@@ -84,12 +88,30 @@ def student_dashboard():
                 ],
                 footer_callback=unenroll_button
             )
-    footer_dashboard()
+
+            with st.expander(f"Voice attendance for {sub['name']}"):
+                for submission in submissions_by_subject.get(sid, []):
+                    if submission.get('status') == 'superseded':
+                        continue
+                    st.caption(
+                        f"{submission['submitted_at']} — "
+                        f"{submission['status'].capitalize()}"
+                    )
+
+                if st.button(
+                    "Submit Voice Attendance",
+                    key=f"voice_attendance_{sid}",
+                    type="primary",
+                    width="stretch",
+                ):
+                    from src.components.dialog_student_voice_attendance import (
+                        student_voice_attendance_dialog,
+                    )
+
+                    student_voice_attendance_dialog(sub, student_data)
 
 
 def student_screen():
-
-
     style_background_dashboard()
     style_base_layout()
 
@@ -104,44 +126,57 @@ def student_screen():
     with c2:
         if st.button("Go back to Home", type='secondary', key='loginbackbtn', shortcut="control+backspace"):
             st.session_state['login_type'] = None
+            st.session_state['show_student_registration'] = False
             st.rerun()
 
     st.header('Login using FaceID', text_alignment='center')
     st.space()
     st.space()
     
-    show_registration = False
+    show_registration = st.session_state.get('show_student_registration', False)
     photo_source = st.camera_input("Position your face in the center")
 
+    if st.button("Register or re-enroll instead", key="register_student_profile"):
+        st.session_state['show_student_registration'] = True
+        from src.pipelines.face_pipeline import get_trained_model
+
+        get_trained_model.clear()
+        st.rerun()
+
     if photo_source:
-        img = np.array(Image.open(photo_source))
+        import numpy as np
+        from PIL import Image
 
-        with st.spinner('AI is scanning..'):
-            detected, all_ids, num_faces = predict_attendance(img)
+        if not show_registration:
+            from src.pipelines.face_pipeline import identify_student
 
-            if num_faces == 0:
-                st.warning('Face not found!')
-            elif num_faces >1:
-                st.warning('Multiple faces found')
-            else:
-                if detected:
-                    student_id = list(detected.keys())[0]
-                    all_students = get_all_students()
-                    student = next((s for s in all_students if s['student_id']==student_id), None)
+            img = np.array(Image.open(photo_source))
 
-                    if student:
-                        st.session_state.is_logged_in = True
-                        st.session_state.user_role = 'student'
-                        st.session_state.student_data = student
-                        st.toast(f'Welcome Back {student['name']}')
-                        time.sleep(1)
-                        st.rerun()
+            with st.spinner('AI is scanning..'):
+                student, num_faces = identify_student(img)
+
+                if num_faces == 0:
+                    st.warning(
+                        'Face not detected. Adjust the lighting and center your '
+                        'face; you can still register below.'
+                    )
+                    show_registration = True
+                elif num_faces > 1:
+                    st.warning('Multiple faces found. Keep only your face in the frame.')
+                elif student:
+                    st.session_state.is_logged_in = True
+                    st.session_state.user_role = 'student'
+                    st.session_state.student_data = student
+                    st.toast(f'Welcome Back {student['name']}')
+                    st.rerun()
                 else:
-                    st.info('Face not recognized! You might be a new student!')
+                    st.info('Face not recognized! Register your profile below.')
                     show_registration = True
     if show_registration:
         with st.container(border=True):
             st.header('Register new Profile')
+            if not photo_source:
+                st.info('Take a clear face photo above to create your profile.')
             new_name = st.text_input("Enter your name", placeholder='E.g. Hamza Rizvi')
 
             st.subheader('Optional : Voice Enrollment')
@@ -155,12 +190,22 @@ def student_screen():
             except Exception:
                 st.error('Audio Data failed!')
 
-            if st.button('Create Account', type='primary'):
+            if st.button('Create Account', type='primary', disabled=not photo_source):
                 if new_name:
                     with st.spinner('Creating profile..'):
+                        import numpy as np
+                        from PIL import Image
+
+                        from src.database.db import create_student
+                        from src.pipelines.face_pipeline import (
+                            get_face_embeddings,
+                            train_classifier,
+                        )
+                        from src.pipelines.voice_pipeline import get_voice_embedding
+
                         img = np.array(Image.open(photo_source))
                         encodings= get_face_embeddings(img)
-                        if encodings:
+                        if len(encodings) == 1:
                             face_emb = encodings[0].tolist()
 
                             voice_emb = None
@@ -174,15 +219,19 @@ def student_screen():
                                 st.session_state.is_logged_in = True
                                 st.session_state.user_role = 'student'
                                 st.session_state.student_data = response_data[0]
+                                st.session_state['show_student_registration'] = False
                                 st.toast(f'Profile Created! Hi {new_name}!')
-                                time.sleep(1)
                                 st.rerun()
+                        elif len(encodings) > 1:
+                            st.error('Only one face should be visible to register.')
                         else:
-                            st.error('Couldnt capture your facial features for registration')
+                            st.error(
+                                'Face not detected in this photo. Retake it with your '
+                                'face centered, well lit, and clearly visible.'
+                            )
 
                 else:
                     st.warning('Please enter your name!')
 
 
         
-    footer_dashboard()
