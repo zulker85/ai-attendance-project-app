@@ -129,6 +129,7 @@ def teacher_tab_take_attendance():
     with c1:
         if st.button('Clear all photos', width='stretch', type='tertiary', icon=':material/delete:', disabled=not has_photos):
             st.session_state.attendance_images = []
+            st.session_state.attendance_image_keys = set()
             st.rerun()
 
 
@@ -145,12 +146,37 @@ def teacher_tab_take_attendance():
                 from src.database.config import supabase
                 from src.pipelines.face_pipeline import predict_attendance
 
+                enrolled_res = (
+                    supabase.table('subject_students')
+                    .select("*, students(*)")
+                    .eq('subject_id', selected_subject_id)
+                    .execute()
+                )
+                enrolled_students = enrolled_res.data
+
+                if not enrolled_students:
+                    st.warning('No students enrolled in this course')
+                    return
+
+                candidate_student_ids = [
+                    node['students']['student_id']
+                    for node in enrolled_students
+                    if node.get('students')
+                    and node['students'].get('face_embedding')
+                ]
                 all_detected_ids = {}
+                total_faces_detected = 0
+                unmatched_faces = 0
 
                 for idx, img in enumerate(st.session_state.attendance_images):
                     img_np = np.array(img.convert('RGB'))
-                    detected, _, _ = predict_attendance(img_np)
-
+                    detected, faces_detected, unmatched = predict_attendance(
+                        img_np,
+                        candidate_student_ids=candidate_student_ids,
+                        expected_face_count=len(candidate_student_ids),
+                    )
+                    total_faces_detected += faces_detected
+                    unmatched_faces += unmatched
 
                     if detected:
                         for sid in detected.keys():
@@ -158,36 +184,48 @@ def teacher_tab_take_attendance():
 
                             all_detected_ids.setdefault(student_id, []).append(f"Photo {idx+1}")
 
-                enrolled_res = supabase.table('subject_students').select("*, students(*)").eq('subject_id',selected_subject_id ).execute()
-                enrolled_students = enrolled_res.data
+                results, attendance_to_log = [], []
+                current_timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
-                if not enrolled_students:
-                    st.warning('No students enrolled in this course')
+                for node in enrolled_students:
+                    student = node['students']
+                    sources = all_detected_ids.get(int(student['student_id']), [])
+                    is_present = len(sources) > 0
+
+                    results.append({
+                        "Name": student['name'],
+                        "ID": student['student_id'],
+                        "Source": ", ".join(sources) if is_present else "-",
+                        "Status": "✅ Present" if is_present else "❌ Absent"
+                    })
+
+                    attendance_to_log.append({
+                        'student_id': student['student_id'],
+                        'subject_id': selected_subject_id,
+                        'timestamp': current_timestamp,
+                        'is_present': bool(is_present)
+                    })
+
+                matched_faces = total_faces_detected - unmatched_faces
+                unrecognized_student_count = (
+                    len(enrolled_students) - len(all_detected_ids)
+                )
+                if unmatched_faces or unrecognized_student_count:
+                    st.warning(
+                        f"Matched {matched_faces} of {total_faces_detected} detected "
+                        f"face observations; {unmatched_faces} faces could not be "
+                        f"matched, and {unrecognized_student_count} enrolled students "
+                        "were not recognized in the photos. "
+                        "Try a closer, well-lit photo with faces unobstructed, or add "
+                        "another photo from a different part of the room. Students "
+                        "who are present but not recognized can submit voice "
+                        "attendance; review those requests in Voice Reviews."
+                    )
                 else:
-
-                    results, attendance_to_log  = [], []
-
-                    current_timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-
-
-                    for node in enrolled_students:
-                        student = node['students']
-                        sources = all_detected_ids.get(int(student['student_id']), [])
-                        is_present= len(sources) > 0
-
-                        results.append({
-                            "Name": student['name'],
-                            "ID": student['student_id'],
-                            "Source": ", ".join(sources) if is_present else "-",
-                            "Status": "✅ Present" if is_present else "❌ Absent"
-                        })
-
-                        attendance_to_log.append({
-                            'student_id': student['student_id'],
-                            'subject_id': selected_subject_id,
-                            'timestamp': current_timestamp,
-                            'is_present': bool(is_present)
-                        })
+                    st.info(
+                        f"Matched {matched_faces} of {total_faces_detected} detected "
+                        "face observations. Review the roster before saving."
+                    )
 
                 attendance_result_dialog(pd.DataFrame(results), attendance_to_log)
 

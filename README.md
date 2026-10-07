@@ -21,3 +21,14 @@ recording. Teachers review requests in the **Voice Reviews** tab. Approval
 records the submission in the existing attendance log. A new submission
 replaces an earlier pending request; reviewed decisions remain in the student's
 history.
+
+For crowded classroom photos, upload or capture multiple clear views from
+different parts of the room. Face detection keeps more image detail than the
+previous 800-pixel resize and retries with stronger upsampling when fewer faces
+are detected than enrolled profiles. Attendance recognition is limited to the
+selected subject's enrolled students. The review screen reports detected faces
+that could not be matched; review the roster before saving and use student voice
+attendance plus the **Voice Reviews** tab for missed students. Occlusion, faces
+that are too small or turned away, poor lighting, and missing or outdated
+student profiles can still prevent a match, so a single group photo cannot
+guarantee perfect recognition.

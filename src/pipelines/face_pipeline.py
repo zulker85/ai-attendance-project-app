@@ -7,6 +7,7 @@ from PIL import Image
 import streamlit as st
 
 from src.database.db import get_all_students
+from src.pipelines.face_matching import FACE_MATCH_THRESHOLD, match_face_embeddings
 
 
 @st.cache_resource
@@ -24,12 +25,13 @@ def load_dlib_models():
 
     return detector, sp, facerec
 
-def get_face_embeddings(image_np):
+
+def get_face_embeddings(image_np, expected_face_count=0):
     detector, sp, facerec = load_dlib_models()
     height, width = image_np.shape[:2]
     max_dimension = max(height, width)
-    if max_dimension > 800:
-        scale = 800 / max_dimension
+    if max_dimension > 1600:
+        scale = 1600 / max_dimension
         image_np = np.asarray(
             Image.fromarray(image_np).resize(
                 (int(width * scale), int(height * scale)),
@@ -37,9 +39,11 @@ def get_face_embeddings(image_np):
             )
         )
 
-    faces = detector(image_np, 0)
-    if len(faces) == 0:
-        faces = detector(image_np, 1)
+    faces = detector(image_np, 1)
+    if expected_face_count and len(faces) < expected_face_count:
+        higher_resolution_faces = detector(image_np, 2)
+        if len(higher_resolution_faces) > len(faces):
+            faces = higher_resolution_faces
 
     encodings= []
 
@@ -84,27 +88,26 @@ def train_classifier():
     model_data = get_trained_model()
     return bool(model_data)
 
-def predict_attendance(class_image_np):
-    encodings = get_face_embeddings(class_image_np)
-    detected_student = {}
+def predict_attendance(
+    class_image_np,
+    candidate_student_ids=None,
+    expected_face_count=0,
+):
+    encodings = get_face_embeddings(class_image_np, expected_face_count)
     model_data = get_trained_model()
 
     if not model_data:
-        return detected_student, [], len(encodings)
+        return {}, len(encodings), len(encodings)
 
-    for encoding in encodings:
-        distances = np.linalg.norm(
-            model_data['embeddings'] - encoding,
-            axis=1,
-        )
-        best_index = int(np.argmin(distances))
-        if distances[best_index] <= 0.6:
-            detected_student[int(model_data['student_ids'][best_index])] = True
-
+    detected_student, matched_face_count = match_face_embeddings(
+        encodings,
+        model_data,
+        candidate_student_ids,
+    )
     return (
         detected_student,
-        sorted(set(model_data['student_ids'])),
         len(encodings),
+        len(encodings) - matched_face_count,
     )
 
 
@@ -120,7 +123,7 @@ def identify_student(image_np):
     encoding = encodings[0]
     distances = np.linalg.norm(model_data['embeddings'] - encoding, axis=1)
     best_index = int(np.argmin(distances))
-    if distances[best_index] > 0.6:
+    if distances[best_index] > FACE_MATCH_THRESHOLD:
         return None, len(encodings)
 
     student_id = model_data['student_ids'][best_index]

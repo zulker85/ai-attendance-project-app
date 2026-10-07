@@ -16,6 +16,7 @@ def show_attendance_result(df, logs):
         if st.button('Discard', width='stretch'):
             st.session_state.voice_attendance_results = None
             st.session_state.attendance_images = []
+            st.session_state.attendance_image_keys = set()
             st.rerun()
 
     with col2:
@@ -24,6 +25,7 @@ def show_attendance_result(df, logs):
                 create_attendance(logs)
                 st.toast("Attendance taken")
                 st.session_state.attendance_images = []
+                st.session_state.attendance_image_keys = set()
                 st.session_state.voice_attendance_results = None
                 st.rerun()
             except Exception as e:
@@ -34,5 +36,4 @@ def show_attendance_result(df, logs):
 @st.dialog("Attendance Reports")
 def attendance_result_dialog(df, logs):
     show_attendance_result(df, logs)
-
 
