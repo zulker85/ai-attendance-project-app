@@ -54,7 +54,7 @@ def get_face_embeddings(image_np, expected_face_count=0):
         encodings.append(np.array(face_descriptor))
     return encodings
 
-@st.cache_resource(ttl=5)
+@st.cache_resource
 def get_trained_model():
     students = get_all_students()
 
@@ -128,3 +128,14 @@ def identify_student(image_np):
 
     student_id = model_data['student_ids'][best_index]
     return model_data['students_by_id'][student_id], len(encodings)
+
+
+def measure_face_match(image_np, saved_embedding):
+    encodings = get_face_embeddings(image_np)
+    if len(encodings) != 1:
+        return None, len(encodings)
+
+    distance = float(np.linalg.norm(
+        np.asarray(saved_embedding, dtype=np.float64) - encodings[0]
+    ))
+    return distance, len(encodings)

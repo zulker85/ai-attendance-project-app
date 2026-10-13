@@ -40,7 +40,7 @@ def teacher_dashboard():
 
     if "current_teacher_tab" not in st.session_state:
         st.session_state.current_teacher_tab = 'take_attendance'
-    tab1, tab2, tab3, tab4 = st.columns(4)
+    tab1, tab2, tab3, tab4, tab5 = st.columns(5)
 
 
     with tab1:
@@ -67,6 +67,12 @@ def teacher_dashboard():
             st.session_state.current_teacher_tab = 'voice_reviews'
             st.rerun()
 
+    with tab5:
+        type5 = "primary" if st.session_state.current_teacher_tab == 'live_sessions' else "tertiary"
+        if st.button('Live Check-in', type=type5, width='stretch', icon=':material/qr_code_2:'):
+            st.session_state.current_teacher_tab = 'live_sessions'
+            st.rerun()
+
 
     st.divider()
 
@@ -78,6 +84,8 @@ def teacher_dashboard():
         teacher_tab_attendance_records()
     if st.session_state.current_teacher_tab == "voice_reviews":
         teacher_tab_voice_reviews()
+    if st.session_state.current_teacher_tab == "live_sessions":
+        teacher_tab_live_sessions()
 
     
 
@@ -124,6 +132,9 @@ def teacher_tab_take_attendance():
             with gallery_cols[idx % 4 ]:
                 st.image(img, width='stretch', caption=f'Photo {idx+1}')
     has_photos = bool(st.session_state.attendance_images)
+    if not has_photos:
+        st.info('Add or capture at least one classroom photo to enable face analysis.')
+
     c1, c2 = st.columns(2)
 
     with c1:
@@ -135,7 +146,18 @@ def teacher_tab_take_attendance():
 
     with c2:
         
-        if st.button('Run Face Analysis', width='stretch', type='secondary', icon=':material/analytics:', disabled=not has_photos):
+        if st.button(
+            'Run Face Analysis',
+            width='stretch',
+            type='secondary',
+            icon=':material/analytics:',
+            disabled=not has_photos,
+            help=(
+                'Add or capture at least one classroom photo first.'
+                if not has_photos
+                else None
+            ),
+        ):
             with st.spinner('Deep scanning classroom photos...'):
                 from datetime import datetime
 
@@ -218,8 +240,8 @@ def teacher_tab_take_attendance():
                         "were not recognized in the photos. "
                         "Try a closer, well-lit photo with faces unobstructed, or add "
                         "another photo from a different part of the room. Students "
-                        "who are present but not recognized can submit voice "
-                        "attendance; review those requests in Voice Reviews."
+                        "who are present but not recognized can use voice "
+                        "verification in Live Check-in."
                     )
                 else:
                     st.info(
@@ -271,8 +293,6 @@ def teacher_tab_manage_subjects():
 
 
 def teacher_tab_attendance_records():
-    from datetime import datetime
-
     import pandas as pd
 
     from src.database.db import get_attendance_for_teacher
@@ -289,17 +309,29 @@ def teacher_tab_attendance_records():
 
     for r in records:
         ts = r.get('timestamp')
-        parsed_ts = (
-            datetime.fromisoformat(ts.replace('Z', '+00:00'))
-            if ts
-            else None
+        parsed_ts = pd.to_datetime(ts, utc=True) if ts else pd.NaT
+        class_session = r.get('class_sessions') or {}
+        session_started_at = class_session.get('started_at')
+        session_time = (
+            pd.to_datetime(session_started_at, utc=True)
+            if session_started_at
+            else parsed_ts
         )
         subject = r['subjects']
         student = r.get('students') or {}
+        class_session_id = r.get('class_session_id')
+        session_key = (
+            f"class:{class_session_id}"
+            if class_session_id is not None
+            else f"legacy:{parsed_ts.floor('s').isoformat()}"
+            if not pd.isna(parsed_ts)
+            else 'legacy:unknown'
+        )
 
         data.append({
-            "ts_group": parsed_ts.replace(microsecond=0).isoformat() if parsed_ts else None,
-            "Time": parsed_ts.strftime("%Y-%m-%d %I:%M %p") if parsed_ts else "N'A",
+            "ts_group": session_key,
+            "Session_Order": session_time,
+            "Time": session_time.strftime("%Y-%m-%d %I:%M %p") if not pd.isna(session_time) else "N'A",
             "Subject ID": subject['subject_id'],
             "Subject": subject['name'],
             "Subject Code": subject['subject_code'],
@@ -315,20 +347,21 @@ def teacher_tab_attendance_records():
         keep='last',
     ).copy()
     sessions = (
-        detail_df[['Subject ID', 'Student ID', 'ts_group']]
-        .drop_duplicates()
-        .sort_values(['Subject ID', 'Student ID', 'ts_group'])
+        detail_df[['Subject ID', 'Student ID', 'ts_group', 'Session_Order']]
+        .drop_duplicates(subset=['Subject ID', 'Student ID', 'ts_group'])
+        .sort_values(['Subject ID', 'Student ID', 'Session_Order'])
     )
     sessions['Classes Held (through this class)'] = (
         sessions.groupby(['Subject ID', 'Student ID']).cumcount() + 1
     )
+    sessions = sessions.drop(columns=['Session_Order'])
     detail_df = detail_df.merge(
         sessions,
         on=['Subject ID', 'Student ID', 'ts_group'],
         how='left',
     )
     detail_df = detail_df.sort_values(
-        ['Subject ID', 'ts_group', 'Student ID']
+        ['Subject ID', 'Session_Order', 'Student ID']
     )
     detail_df['Classes Attended (through this class)'] = (
         detail_df.groupby(['Subject ID', 'Student ID'])['is_present'].cumsum()
@@ -360,7 +393,8 @@ def teacher_tab_attendance_records():
         df.groupby(['ts_group', 'Time', 'Subject', 'Subject Code'])
         .agg(
             Present_Count = ('is_present', 'sum'),
-            Total_Count =('is_present', 'count')
+            Total_Count =('is_present', 'count'),
+            Session_Order=('Session_Order', 'min'),
         ).reset_index()
 
     )
@@ -370,11 +404,46 @@ def teacher_tab_attendance_records():
         + summary['Total_Count'].astype(str) + ' Students'
     )
 
-    display_df = ( summary.sort_values(by='ts_group' ,ascending=False)
+    display_df = ( summary.sort_values(by='Session_Order' ,ascending=False)
                   [['Time', 'Subject', 'Subject Code', 'Attendance Stats']]
                   )
     
     st.dataframe(display_df, width='stretch', hide_index=True)
+
+    student_summary = (
+        detail_df.groupby(['Subject', 'Subject Code', 'Student ID', 'Name'])
+        .agg(
+            Classes_Attended=('is_present', 'sum'),
+            Classes_Held=('is_present', 'count'),
+        )
+        .reset_index()
+    )
+    student_summary['Attendance Rate'] = (
+        100 * student_summary['Classes_Attended'] / student_summary['Classes_Held']
+    ).round(1)
+    student_summary = student_summary.rename(columns={
+        'Classes_Attended': 'Classes Attended',
+        'Classes_Held': 'Classes Held',
+    })
+    st.subheader('Student attendance trends')
+    st.caption(
+        "Rates are calculated from the attendance records currently stored in "
+        "the system; review the underlying sessions before making decisions."
+    )
+    st.dataframe(
+        student_summary.sort_values(
+            ['Attendance Rate', 'Name'], ascending=[True, True]
+        ),
+        width='stretch',
+        hide_index=True,
+    )
+    low_attendance = student_summary[student_summary['Attendance Rate'] < 75]
+    if not low_attendance.empty:
+        st.warning(
+            f"{len(low_attendance)} student-course record(s) are below 75% "
+            "attendance. Use this as an early-support signal, not an automated "
+            "disciplinary decision."
+        )
 
 
 def teacher_tab_voice_reviews():
@@ -450,6 +519,273 @@ def teacher_tab_voice_reviews():
                         st.warning(str(error))
                     else:
                         st.success('Attendance rejected.')
+                        st.rerun()
+
+
+def teacher_tab_live_sessions():
+    from datetime import datetime, timezone
+    from io import BytesIO
+    from urllib.parse import urlencode, urlsplit, urlunsplit
+
+    import segno
+
+    from src.database.db import (
+        close_class_session,
+        get_class_sessions_for_teacher,
+        get_pending_class_checkins,
+        get_teacher_subjects,
+        open_class_session,
+        review_class_checkin,
+        rotate_class_session_code,
+    )
+    from src.pipelines.class_checkin import generate_class_access_code
+
+    teacher_id = st.session_state.teacher_data['teacher_id']
+    st.header('Live class check-in')
+    st.caption(
+        'Open a time-limited code for an enrolled class. Strong face/voice matches '
+        'are recorded; borderline matches wait for your review. Opening a new '
+        'session for the same subject finalizes the earlier session.'
+    )
+    subjects = get_teacher_subjects(teacher_id)
+    if not subjects:
+        st.info('Create a subject before opening a live check-in session.')
+        return
+
+    subject_options = {
+        f"{subject['name']} — {subject['subject_code']}": subject['subject_id']
+        for subject in subjects
+    }
+    with st.container(border=True):
+        selected_label = st.selectbox(
+            'Subject for this session',
+            list(subject_options),
+            key='live_checkin_subject',
+        )
+        duration_minutes = st.selectbox(
+            'Code lifetime',
+            (5, 10, 15, 30, 45, 60),
+            index=2,
+            format_func=lambda minutes: f'{minutes} minutes',
+            key='live_checkin_duration',
+        )
+        if st.button(
+            'Open live check-in',
+            type='primary',
+            width='stretch',
+            key='open_live_checkin',
+        ):
+            try:
+                open_class_session(
+                    subject_options[selected_label],
+                    teacher_id,
+                    generate_class_access_code(),
+                    duration_minutes,
+                )
+            except Exception as error:
+                st.error(f'Could not open the check-in session: {error}')
+            else:
+                st.success('Live check-in is open.')
+                st.rerun()
+
+    sessions = get_class_sessions_for_teacher(teacher_id)
+    active_sessions = []
+    now = datetime.now(timezone.utc)
+    for session in sessions:
+        expires_at = datetime.fromisoformat(
+            session['expires_at'].replace('Z', '+00:00')
+        )
+        active = session.get('closed_at') is None and expires_at > now
+        if active:
+            active_sessions.append(session)
+            subject = session.get('subjects') or {}
+            st.subheader(
+                f"Active: {subject.get('name', 'Class')} "
+                f"({subject.get('subject_code', '')})"
+            )
+            st.code(session['access_code'], language=None)
+            st.caption(
+                f"Expires at {expires_at.astimezone().strftime('%Y-%m-%d %I:%M %p')}"
+            )
+
+            parsed_url = urlsplit(st.context.url)
+            checkin_url = urlunsplit((
+                parsed_url.scheme,
+                parsed_url.netloc,
+                parsed_url.path,
+                urlencode({
+                    'page': 'student',
+                    'session-code': session['access_code'],
+                }),
+                '',
+            ))
+            qr_buffer = BytesIO()
+            segno.make_qr(checkin_url).save(
+                qr_buffer,
+                kind='png',
+                scale=5,
+                border=2,
+            )
+            st.image(
+                qr_buffer.getvalue(),
+                width=190,
+                alt='QR code linking to the student check-in page with this session code',
+            )
+            st.caption(
+                'Students must sign in and be enrolled in this class. Do not '
+                'share this QR/code outside the room.'
+            )
+            if parsed_url.hostname in {'localhost', '127.0.0.1'}:
+                st.warning(
+                    'This QR points to a local development address. Use a '
+                    'network-accessible deployment when students scan it.'
+                )
+
+            rotate_col, close_col = st.columns(2)
+            with rotate_col:
+                if st.button(
+                    'Rotate code',
+                    key=f"rotate_session_{session['session_id']}",
+                    width='stretch',
+                ):
+                    try:
+                        rotate_class_session_code(
+                            session['session_id'],
+                            teacher_id,
+                            generate_class_access_code(),
+                        )
+                    except Exception as error:
+                        st.error(f'Could not rotate the code: {error}')
+                    else:
+                        st.rerun()
+            with close_col:
+                if st.button(
+                    'Close session',
+                    key=f"close_session_{session['session_id']}",
+                    type='secondary',
+                    width='stretch',
+                ):
+                    try:
+                        close_class_session(session['session_id'], teacher_id)
+                    except Exception as error:
+                        st.error(f'Could not close the session: {error}')
+                    else:
+                        st.success('Check-in session closed.')
+                        st.rerun()
+
+    if not active_sessions:
+        st.info('There are no active live check-in sessions.')
+    if sessions:
+        with st.expander('Recent session history'):
+            for session in sessions:
+                subject = session.get('subjects') or {}
+                expires_at = datetime.fromisoformat(
+                    session['expires_at'].replace('Z', '+00:00')
+                )
+                state = (
+                    'Closed'
+                    if session.get('closed_at')
+                    else 'Expired'
+                    if expires_at <= now
+                    else 'Active'
+                )
+                st.caption(
+                    f"{subject.get('name', 'Class')} · {state} · "
+                    f"started {session['started_at']}"
+                )
+                if state == 'Expired' and session.get('closed_at') is None:
+                    if st.button(
+                        'Finalize attendance',
+                        key=f"finalize_session_{session['session_id']}",
+                    ):
+                        try:
+                            close_class_session(
+                                session['session_id'], teacher_id
+                            )
+                        except Exception as error:
+                            st.error(f'Could not finalize attendance: {error}')
+                        else:
+                            st.success('Session finalized.')
+                            st.rerun()
+
+    st.divider()
+    st.subheader('Check-ins needing review')
+    pending_checkins = get_pending_class_checkins(teacher_id)
+    if not pending_checkins:
+        st.info('No borderline face or voice matches are waiting for review.')
+        return
+
+    for checkin in pending_checkins:
+        student = checkin.get('students') or {}
+        session = checkin.get('class_sessions') or {}
+        subject = session.get('subjects') or {}
+        method = checkin['verification_method']
+        score = checkin['verification_score']
+        score_label = (
+            f'{score:.3f} face distance'
+            if method == 'face'
+            else f'{score:.1%} voice similarity'
+        )
+        with st.container(border=True):
+            st.write(
+                f"**{student.get('name', 'Student')}** — "
+                f"{subject.get('name', 'Class')} "
+                f"({subject.get('subject_code', '')})"
+            )
+            st.caption(
+                f"Submitted {checkin['submitted_at']} · "
+                f"{method.capitalize()} · {score_label}"
+            )
+            flags = checkin.get('risk_flags') or []
+            if flags:
+                st.warning(
+                    'Review flags: '
+                    + ', '.join(flag.replace('_', ' ') for flag in flags)
+                )
+            if checkin.get('latitude') is not None:
+                location_url = (
+                    'https://www.google.com/maps/search/?api=1&query='
+                    f"{checkin['latitude']},{checkin['longitude']}"
+                )
+                st.markdown(f'[View optional submitted location]({location_url})')
+                if checkin.get('location_accuracy_m') is not None:
+                    st.caption(
+                        'Reported GPS accuracy: '
+                        f"{checkin['location_accuracy_m']} m"
+                    )
+
+            approve_col, reject_col = st.columns(2)
+            with approve_col:
+                if st.button(
+                    'Approve check-in',
+                    key=f"approve_class_checkin_{checkin['checkin_id']}",
+                    type='primary',
+                    width='stretch',
+                ):
+                    try:
+                        review_class_checkin(
+                            checkin['checkin_id'], teacher_id, approved=True
+                        )
+                    except Exception as error:
+                        st.error(f'Could not approve this check-in: {error}')
+                    else:
+                        st.success('Attendance approved and recorded.')
+                        st.rerun()
+            with reject_col:
+                if st.button(
+                    'Reject check-in',
+                    key=f"reject_class_checkin_{checkin['checkin_id']}",
+                    type='secondary',
+                    width='stretch',
+                ):
+                    try:
+                        review_class_checkin(
+                            checkin['checkin_id'], teacher_id, approved=False
+                        )
+                    except Exception as error:
+                        st.error(f'Could not reject this check-in: {error}')
+                    else:
+                        st.success('Check-in rejected.')
                         st.rerun()
 
 

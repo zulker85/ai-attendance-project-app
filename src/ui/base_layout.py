@@ -125,8 +125,15 @@ def style_base_layout():
                 transition: transform 0.25s ease-in-out !important;
                 }
 
-            button:hover{
-                transform :scale(1.05)}
+            button:disabled {
+                opacity: 0.45 !important;
+                cursor: not-allowed !important;
+                transform: none !important;
+            }
+
+            button:not(:disabled):hover {
+                transform: scale(1.03);
+            }
         </style>  
 
                 """
