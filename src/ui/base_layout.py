@@ -41,6 +41,51 @@ def style_background_dashboard():
                 .stApp [data-testid="stSpinner"] p {
                     color: #000 !important;
                 }
+
+                    .stApp [data-testid="stAlert"] p,
+                    .stApp [data-testid="stAlert"] span,
+                    .stApp [data-testid="stFileUploader"] label,
+                    .stApp [data-testid="stFileUploader"] small,
+                    .stApp [data-testid="stCaptionContainer"] p {
+                        color: #111827 !important;
+                    }
+
+                    .stApp [data-testid="stAlert"] {
+                        border: 1px solid #374151 !important;
+                        font-weight: 600 !important;
+                    }
+
+                    .stApp [data-testid="stException"] {
+                        background: #fff7ed !important;
+                        color: #111827 !important;
+                        border: 2px solid #c2410c !important;
+                        border-radius: 0.75rem !important;
+                        padding: 1rem !important;
+                    }
+
+                    .stApp [data-testid="stException"] * {
+                        color: #111827 !important;
+                    }
+
+                    .stApp [data-testid="stFileUploader"] section,
+                    .stApp [data-testid="stFileUploaderDropzone"],
+                    .stApp [data-testid="stAudioInput"] {
+                        background: #ffffff !important;
+                        color: #111827 !important;
+                        border: 1px solid #64748b !important;
+                    }
+
+                    .stApp [data-testid="stFileUploader"] section *,
+                    .stApp [data-testid="stFileUploaderDropzone"] *,
+                    .stApp [data-testid="stAudioInput"] * {
+                        color: #111827 !important;
+                    }
+
+                    .stApp [data-testid="stFileUploader"] button,
+                    .stApp [data-testid="stAudioInput"] button {
+                        background: #5865f2 !important;
+                        color: #ffffff !important;
+                    }
         </style>  
 
                 """

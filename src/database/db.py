@@ -1,5 +1,24 @@
-from src.database.config import supabase
+import logging
+
 import bcrypt
+import httpx
+from postgrest.exceptions import APIError
+
+from src.database.config import supabase
+
+
+logger = logging.getLogger(__name__)
+
+
+def _show_connection_error():
+    logger.exception("Supabase connection failed")
+    from streamlit import error as show_error
+
+    show_error(
+        "Could not connect to Supabase. Check that SUPABASE_URL is the URL "
+        "of an active Supabase project and that your internet connection or "
+        "firewall allows access, then restart the app."
+    )
 
 
 
@@ -34,7 +53,11 @@ def teacher_login(username, password):
 
 
 def get_all_students():
-    response = supabase.table('students').select("*").execute()
+    try:
+        response = supabase.table('students').select("*").execute()
+    except (httpx.ConnectError, httpx.TimeoutException):
+        _show_connection_error()
+        return []
     return response.data
 
 def create_student(
@@ -89,15 +112,30 @@ def record_student_biometric_consent(student_id, method):
     if method not in consent_columns:
         raise ValueError('Unsupported biometric consent type.')
 
-    response = (
-        supabase.table('students')
-        .update({
-            consent_columns[method]: datetime.now(timezone.utc).isoformat()
-        })
-        .eq('student_id', student_id)
-        .select('student_id')
-        .execute()
-    )
+    try:
+        response = (
+            supabase.table('students')
+            .update({
+                consent_columns[method]: datetime.now(timezone.utc).isoformat()
+            })
+            .eq('student_id', student_id)
+            .select('student_id')
+            .execute()
+        )
+    except APIError as error:
+        logger.exception("Could not record biometric consent")
+        error_code = getattr(error, "code", None)
+        if error_code == "401" or "JWT" in str(error).upper():
+            raise RuntimeError(
+                "Supabase rejected SUPABASE_KEY (HTTP 401). Copy a current "
+                "server-side secret key from the active Supabase project API "
+                "settings into .streamlit/secrets.toml, then restart the app."
+            ) from error
+        raise RuntimeError(
+            "Could not save biometric consent. Run sql/students.sql in the "
+            "Supabase SQL Editor, then restart the app. If the problem "
+            "continues, verify that SUPABASE_KEY is a server-side key."
+        ) from error
     if not response.data:
         raise ValueError('Could not record biometric consent.')
 
@@ -120,26 +158,33 @@ def create_subject(subject_code, name, section, teacher_id):
     return response.data
 
 def get_teacher_subjects(teacher_id):
-    response = supabase.table('subjects').select(
-        "*, subject_students(count), attendance_logs(timestamp, class_session_id)"
-    ).eq("teacher_id", teacher_id).execute()
-    subjects = response.data
+    subjects = (
+        supabase.table("subjects")
+        .select("*")
+        .eq("teacher_id", teacher_id)
+        .execute()
+        .data
+    )
 
-
-    for sub in subjects:
-        sub['total_students'] = sub.get("subject_students", [{}])[0].get('count', 0) if sub.get('subject_students') else 0
-        attendance = sub.get('attendance_logs', [])
-        unique_sessions = len({
-            ('session', log['class_session_id'])
-            if log.get('class_session_id') is not None
-            else ('timestamp', log['timestamp'])
-            for log in attendance
-        })
-        sub['total_classes'] = unique_sessions
-
-
-        sub.pop('subject_student', None)
-        sub.pop('attendance_logs', None)
+    for subject in subjects:
+        subject_id = subject["subject_id"]
+        student_count = (
+            supabase.table("subject_students")
+            .select("student_id", count="exact")
+            .eq("subject_id", subject_id)
+            .execute()
+        )
+        attendance = (
+            supabase.table("attendance_logs")
+            .select("timestamp")
+            .eq("subject_id", subject_id)
+            .execute()
+            .data
+        )
+        subject["total_students"] = student_count.count or 0
+        subject["total_classes"] = len(
+            {log["timestamp"] for log in attendance if log.get("timestamp")}
+        )
 
     return subjects
 
@@ -171,13 +216,41 @@ def create_attendance(logs):
     return response.data
 
 def get_attendance_for_teacher(teacher_id):
-    response = (
-        supabase.table('attendance_logs')
-        .select("*, subjects!inner(*), students(name), class_sessions(started_at)")
-        .eq('subjects.teacher_id', teacher_id)
+    subjects = (
+        supabase.table("subjects")
+        .select("*")
+        .eq("teacher_id", teacher_id)
         .execute()
+        .data
     )
-    return response.data
+    if not subjects:
+        return []
+
+    subject_by_id = {subject["subject_id"]: subject for subject in subjects}
+    attendance = (
+        supabase.table("attendance_logs")
+        .select("*")
+        .in_("subject_id", list(subject_by_id))
+        .execute()
+        .data
+    )
+    student_ids = {row["student_id"] for row in attendance if row.get("student_id")}
+    students = (
+        supabase.table("students")
+        .select("student_id, name")
+        .in_("student_id", list(student_ids))
+        .execute()
+        .data
+        if student_ids
+        else []
+    )
+    student_by_id = {student["student_id"]: student for student in students}
+
+    for row in attendance:
+        row["subjects"] = subject_by_id.get(row["subject_id"], {})
+        row["students"] = student_by_id.get(row.get("student_id"), {})
+
+    return attendance
 
 
 def get_student_voice_attendance(student_id):
@@ -288,15 +361,43 @@ def close_class_session(session_id, teacher_id):
 
 
 def get_class_sessions_for_teacher(teacher_id):
-    response = (
-        supabase.table('class_sessions')
-        .select('*, subjects(name, subject_code, section)')
-        .eq('teacher_id', teacher_id)
-        .order('started_at', desc=True)
-        .limit(100)
-        .execute()
-    )
-    return response.data
+    try:
+        sessions = (
+            supabase.table("class_sessions")
+            .select("*")
+            .eq('teacher_id', teacher_id)
+            .order('started_at', desc=True)
+            .limit(100)
+            .execute()
+            .data
+        )
+    except APIError:
+        logger.exception("Could not load live class sessions")
+        from streamlit import error as show_error
+
+        show_error(
+            "Live Sessions are not available yet. Run "
+            "sql/class_checkin_sessions.sql in the SQL Editor for the "
+            "Supabase project configured in this app."
+        )
+        return []
+    subject_ids = {session["subject_id"] for session in sessions}
+    subjects = []
+    if subject_ids:
+        try:
+            subjects = (
+                supabase.table("subjects")
+                .select("subject_id, name, subject_code, section")
+                .in_("subject_id", list(subject_ids))
+                .execute()
+                .data
+            )
+        except APIError:
+            logger.exception("Could not load subjects for live class sessions")
+    subject_by_id = {subject["subject_id"]: subject for subject in subjects}
+    for session in sessions:
+        session["subjects"] = subject_by_id.get(session["subject_id"], {})
+    return sessions
 
 
 def submit_class_checkin(
@@ -328,17 +429,21 @@ def submit_class_checkin(
 
 
 def get_pending_class_checkins(teacher_id):
-    response = (
-        supabase.table('class_checkins')
-        .select(
-            '*, students(name), '
-            'class_sessions!inner(subject_id, teacher_id, subjects(name, subject_code, section))'
+    try:
+        response = (
+            supabase.table('class_checkins')
+            .select(
+                '*, students(name), '
+                'class_sessions!inner(subject_id, teacher_id, subjects(name, subject_code, section))'
+            )
+            .eq('status', 'pending')
+            .eq('class_sessions.teacher_id', teacher_id)
+            .order('submitted_at')
+            .execute()
         )
-        .eq('status', 'pending')
-        .eq('class_sessions.teacher_id', teacher_id)
-        .order('submitted_at')
-        .execute()
-    )
+    except APIError:
+        logger.exception("Could not load pending class check-ins")
+        return []
     return response.data
 
 

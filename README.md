@@ -25,6 +25,8 @@ Older voice requests remain available in **Voice Reviews**. New voice submission
 are session-bound; students explicitly consent before recording, and the
 per-subject voice dialog does not collect location. In the main Live Check-in
 panel, students can optionally share GPS for either verification method.
+Voice fields support live microphone recording and WAV, MP3, OGG, WEBM, or M4A
+uploads. Use the upload option if the browser blocks microphone access.
 
 ## Live, trust-aware class check-in
 

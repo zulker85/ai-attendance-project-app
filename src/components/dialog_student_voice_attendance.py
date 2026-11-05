@@ -27,19 +27,21 @@ def student_voice_attendance_dialog(subject, student):
     )
     voice_profile = student.get("voice_embedding")
     profile_audio = None
+    from src.components.voice_input import voice_input
+
     if not voice_profile:
         st.info(
             "No voice profile is saved. To use this option, create one with "
             "a profile recording and a separate check-in recording. Only the "
             "numeric voice template is saved."
         )
-        profile_audio = st.audio_input(
+        profile_audio = voice_input(
             "Record a voice profile sample",
             key=f"voice_profile_enrollment_{student_id}",
             disabled=not consent,
         )
 
-    attendance_audio = st.audio_input(
+    attendance_audio = voice_input(
         "Record a fresh check-in sample",
         key=f"voice_attendance_sample_{student_id}_{subject_id}",
         disabled=not consent,

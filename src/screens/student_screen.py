@@ -4,6 +4,7 @@ from src.ui.base_layout import style_background_dashboard, style_base_layout
 
 from src.components.header import header_dashboard
 from src.components.subject_card import subject_card
+from src.components.voice_input import voice_input
 from src.ui.navigation import navigate_to
 
 def student_dashboard():
@@ -328,12 +329,12 @@ def _render_live_class_checkin(student_data):
                 "No voice profile is saved. You may create one using two "
                 "separate recordings; only the numeric voice template is saved."
             )
-            profile_audio = st.audio_input(
+            profile_audio = voice_input(
                 "Record a voice profile sample",
                 key=f"checkin_voice_profile_{student_id}",
                 disabled=not voice_consent,
             )
-        attendance_audio = st.audio_input(
+        attendance_audio = voice_input(
             "Record a fresh sample for this check-in",
             key=f"checkin_voice_sample_{student_id}",
             disabled=not voice_consent,
@@ -510,14 +511,18 @@ def student_screen():
                 elif student:
                     from src.database.db import record_student_biometric_consent
 
-                    record_student_biometric_consent(
-                        student['student_id'], 'face'
-                    )
-                    st.session_state.is_logged_in = True
-                    st.session_state.user_role = 'student'
-                    st.session_state.student_data = student
-                    st.toast(f'Welcome Back {student["name"]}')
-                    st.rerun()
+                    try:
+                        record_student_biometric_consent(
+                            student['student_id'], 'face'
+                        )
+                    except RuntimeError as error:
+                        st.error(str(error))
+                    else:
+                        st.session_state.is_logged_in = True
+                        st.session_state.user_role = 'student'
+                        st.session_state.student_data = student
+                        st.toast(f'Welcome Back {student["name"]}')
+                        st.rerun()
                 else:
                     st.info('Face not recognized! Register your profile below.')
                     show_registration = True
@@ -530,7 +535,7 @@ def student_screen():
             "I consent to voice biometric processing for sign-in.",
             key='student_voice_signin_consent',
         )
-        voice_audio = st.audio_input(
+        voice_audio = voice_input(
             "Record a fresh voice sample",
             disabled=not voice_consent,
             key='student_voice_signin_audio',
@@ -568,17 +573,21 @@ def student_screen():
             else:
                 from src.database.db import record_student_biometric_consent
 
-                record_student_biometric_consent(student_id, 'voice')
-                student = next(
-                    student
-                    for student in students
-                    if student['student_id'] == student_id
-                )
-                st.session_state.is_logged_in = True
-                st.session_state.user_role = 'student'
-                st.session_state.student_data = student
-                st.toast(f'Welcome back {student["name"]}')
-                st.rerun()
+                try:
+                    record_student_biometric_consent(student_id, 'voice')
+                except RuntimeError as error:
+                    st.error(str(error))
+                else:
+                    student = next(
+                        student
+                        for student in students
+                        if student['student_id'] == student_id
+                    )
+                    st.session_state.is_logged_in = True
+                    st.session_state.user_role = 'student'
+                    st.session_state.student_data = student
+                    st.toast(f'Welcome back {student["name"]}')
+                    st.rerun()
     if show_registration:
         with st.container(border=True):
             st.header('Register new Profile')
@@ -589,7 +598,7 @@ def student_screen():
             )
             if not photo_source:
                 st.info('Take a clear face photo above to create your profile.')
-            new_name = st.text_input("Enter your name", placeholder='E.g. Hamza Rizvi')
+            new_name = st.text_input("Enter your name", placeholder='E.g. Zulker')
 
             st.subheader('Optional : Voice Enrollment')
             st.info("Voice enrollment can be used as an alternative check-in method.")
@@ -603,11 +612,11 @@ def student_screen():
 
             audio_data = None
 
-            try:
-                if voice_consent:
-                    audio_data = st.audio_input('Record a short phrase for voice enrollment.')
-            except Exception:
-                st.error('Voice recording could not be captured.')
+            if voice_consent:
+                audio_data = voice_input(
+                    "Record a short phrase for voice enrollment",
+                    key="student_voice_enrollment_audio",
+                )
 
             if st.button(
                 'Create Account',
