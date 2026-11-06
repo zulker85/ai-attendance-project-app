@@ -62,6 +62,16 @@ verification method, score, and any teacher decision.
 The student privacy panel can delete the profile, biometric embeddings,
 enrollments, attendance records, and voice requests. Deletion is permanent.
 
+## Deleting a subject
+
+Run `sql/delete_teacher_subject.sql` in the Supabase SQL Editor to enable the
+teacher's **Delete subject** action. This creates the required RPC function and
+reloads the Supabase API schema cache. If the function is still not found,
+refresh the schema cache in Supabase and wait a few seconds. The action requires confirmation and
+permanently deletes the selected subject, its enrollments, attendance records,
+voice submissions, class sessions, and session check-ins/reviews. The operation
+runs in a single database transaction.
+
 ## Evaluating this major project
 
 Use a consented, representative evaluation set and report false-accept and

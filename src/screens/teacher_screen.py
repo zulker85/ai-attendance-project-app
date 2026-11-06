@@ -274,20 +274,44 @@ def teacher_tab_manage_subjects():
                 ("🫂", "Students", sub['total_students']),
                 ("🕰️", "Classes", sub['total_classes']),
             ]
-        def share_btn():
-            if st.button(f"Share Code: {sub['name']}", key=f"share_{sub['subject_code']}", icon=":material/share:"):
-                from src.components.dialog_share_subject import share_subject_dialog
+            def subject_actions():
+                share_col, delete_col = st.columns([2, 1])
+                with share_col:
+                    if st.button(
+                        f"Share Code: {sub['name']}",
+                        key=f"share_{sub['subject_id']}",
+                        icon=":material/share:",
+                        width="stretch",
+                    ):
+                        from src.components.dialog_share_subject import share_subject_dialog
 
-                share_subject_dialog(sub['name'], sub['subject_code'])
-            st.space()
+                        share_subject_dialog(sub['name'], sub['subject_code'])
+                with delete_col:
+                    if st.button(
+                        "Delete subject",
+                        key=f"delete_subject_{sub['subject_id']}",
+                        icon=":material/delete:",
+                        width="stretch",
+                    ):
+                        from src.components.dialog_delete_subject import (
+                            delete_subject_dialog,
+                        )
 
-        subject_card(
-            name = sub['name'],
-            code = sub['subject_code'],
-            section = sub['section'],
-            stats=stats,
-            footer_callback=share_btn
-        )
+                        delete_subject_dialog(
+                            sub['subject_id'],
+                            teacher_id,
+                            sub['name'],
+                            sub['subject_code'],
+                        )
+                st.space()
+
+            subject_card(
+                name=sub['name'],
+                code=sub['subject_code'],
+                section=sub['section'],
+                stats=stats,
+                footer_callback=subject_actions
+            )
     else:
         st.info("NO SUBJECTS FOUND. CREATE ONE ABOVE")
 

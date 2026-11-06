@@ -157,6 +157,19 @@ def create_subject(subject_code, name, section, teacher_id):
     response = supabase.table("subjects").insert(data).execute()
     return response.data
 
+
+def delete_teacher_subject(subject_id, teacher_id):
+    response = supabase.rpc(
+        'delete_teacher_subject',
+        {
+            'p_subject_id': subject_id,
+            'p_teacher_id': teacher_id,
+        },
+    ).execute()
+    if not response.data:
+        raise ValueError('The subject could not be deleted.')
+
+
 def get_teacher_subjects(teacher_id):
     subjects = (
         supabase.table("subjects")
