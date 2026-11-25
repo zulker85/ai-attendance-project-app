@@ -125,6 +125,22 @@ def estimate_face_orientation(shape):
     eye_distance = max(float(np.linalg.norm(right_eye - left_eye)), 1.0)
     yaw = float(np.degrees(np.arctan2(nose[0] - eye_mid[0], eye_distance)))
 
+    left_jaw_distance = float(np.linalg.norm(nose - points[0]))
+    right_jaw_distance = float(np.linalg.norm(nose - points[16]))
+    jaw_distance_ratio = (
+        max(left_jaw_distance, right_jaw_distance)
+        / max(min(left_jaw_distance, right_jaw_distance), 1.0)
+    )
+
+    # A frontal 68-point pose estimator can saturate poorly on a true profile.
+    # The jaw/nose asymmetry is a useful fallback for the two profile poses.
+    if jaw_distance_ratio >= 1.65:
+        if right_jaw_distance < left_jaw_distance:
+            label = 'left_profile'
+        else:
+            label = 'right_profile'
+        return yaw, label
+
     # Approximate zones — no strict angles required:
     # left_profile / right_profile: past ~40° (ear starting to face camera)
     # left / right: any noticeable turn from 15° up to 80°
@@ -177,6 +193,16 @@ def analyze_face_capture(image_np):
     face_width = max(face.right() - face.left(), 1)
     face_height = max(face.bottom() - face.top(), 1)
     face_ratio = ((face_width * face_height) / float(gray.shape[0] * gray.shape[1]))
+    points = np.array(
+        [[shape.part(index).x, shape.part(index).y] for index in range(68)],
+        dtype=np.float64,
+    )
+    left_eye_width = float(np.ptp(points[36:42, 0]))
+    right_eye_width = float(np.ptp(points[42:48, 0]))
+    eye_width_ratio = (
+        max(left_eye_width, right_eye_width)
+        / max(min(left_eye_width, right_eye_width), 1.0)
+    )
 
     quality_parts = [
         1.0 if 35 <= brightness <= 235 else max(0.0, 1.0 - abs(brightness - 135.0) / 135.0),
@@ -188,7 +214,13 @@ def analyze_face_capture(image_np):
     valid = (
         brightness >= 30
         and sharpness >= 2.0
-        and face_ratio >= 0.008
+        and (
+            face_ratio >= 0.008
+            or (
+                pose_label in {'left_profile', 'right_profile'}
+                and face_ratio >= 0.005
+            )
+        )
     )
     return {
         'face_count': 1,
@@ -200,6 +232,7 @@ def analyze_face_capture(image_np):
         'brightness': brightness,
         'sharpness': sharpness,
         'face_ratio': face_ratio,
+        'eye_width_ratio': eye_width_ratio,
         'box': (int(left), int(top), int(right), int(bottom)),
         'image_shape': (int(gray.shape[0]), int(gray.shape[1])),
     }

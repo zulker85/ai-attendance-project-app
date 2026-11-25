@@ -471,7 +471,7 @@ def _render_recent_checkins(logs):
     st.dataframe(recent, width="stretch", hide_index=True)
 
 
-def check_pose_orientation(pose, yaw):
+def check_pose_orientation(pose, yaw, detected_pose_label=None):
     """Return True if the measured yaw falls in the approximate zone for the requested pose.
 
     Zones are intentionally wide so a natural, comfortable head turn is enough.
@@ -481,18 +481,18 @@ def check_pose_orientation(pose, yaw):
         return False
     if pose == "front":
         # Broadly facing camera — within ±25°
-        return abs(yaw) <= 25
+        return abs(yaw) <= 20
     if pose == "left":
-        # Any noticeable left turn between 15° and 80° left
-        return -80 <= yaw < -15
+        # Accept slight left turns, including measurements that are close to front.
+        return -65 < yaw <= -10
     if pose == "right":
-        # Any noticeable right turn between 15° and 80° right
-        return 15 < yaw <= 80
+        # Accept slight right turns, including measurements near 10-15 degrees.
+        return 10 <= yaw < 65
     if pose == "left_profile":
         # Ear starting to face camera — just past ~40° is enough, no 90° needed
-        return yaw <= -40
+        return yaw <= -65 or detected_pose_label == "left_profile"
     if pose == "right_profile":
-        return yaw >= 40
+        return yaw >= 65 or detected_pose_label == "right_profile"
     return False
 
 
@@ -523,7 +523,17 @@ def get_pose_capture_feedback(pose, analysis):
         return f"Image quality is too low: {reason_str}. Face a light source, hold steady, and retake."
 
     yaw = analysis.get("yaw_degrees", 0.0)
-    if check_pose_orientation(pose, yaw):
+    if check_pose_orientation(
+        pose,
+        yaw,
+        detected_pose_label=analysis.get("pose_label"),
+    ):
+        if pose in {"left", "right"}:
+            eye_width_ratio = analysis.get("eye_width_ratio")
+            if eye_width_ratio is not None and eye_width_ratio < 1.18:
+                if pose == "left":
+                    return "Turn slightly further left so the right ear and cheek become visible."
+                return "Turn slightly further right so the left ear and cheek become visible."
         return None  # accepted — no additional asymmetry gate
 
     # Simple directional guidance only
@@ -532,11 +542,17 @@ def get_pose_capture_feedback(pose, analysis):
         return f"Turn your head back toward the camera — you are facing too far {direction} ({abs(yaw):.0f}°)."
     if pose == "left":
         if yaw >= -15:
-            return "Turn your head gently to the LEFT — just enough so the camera sees your left cheek."
+            return "Your head is still too centered. Turn gently to the LEFT — just enough to see your left cheek."
+        if yaw >= -30:
+            return "Your head is still too centered. Turn left a little more."
+        if yaw < -65:
+            return "Turned too far into full profile. Ease back slightly toward the left."
         return "That is too far left. Ease back a little so your face is still mostly visible."
     if pose == "right":
         if yaw <= 15:
             return "Turn your head gently to the RIGHT — just enough so the camera sees your right cheek."
+        if yaw > 65:
+            return "Turned too far into full profile. Ease back slightly toward the right."
         return "That is too far right. Ease back a little so your face is still mostly visible."
     if pose == "left_profile":
         return (

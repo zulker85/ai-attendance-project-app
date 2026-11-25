@@ -37,7 +37,7 @@ class PoseOrientationGuidanceTests(unittest.TestCase):
         self.assertTrue(check_pose_orientation("left", -35.0))
         self.assertTrue(check_pose_orientation("left", -50.0))
         self.assertTrue(check_pose_orientation("left", -64.9))
-        self.assertFalse(check_pose_orientation("left", -20.0))   # too centered
+        self.assertFalse(check_pose_orientation("left", -5.0))    # too centered
         self.assertFalse(check_pose_orientation("left", -66.0))   # too far → profile
         self.assertFalse(check_pose_orientation("left", 35.0))    # wrong direction
 
@@ -46,7 +46,7 @@ class PoseOrientationGuidanceTests(unittest.TestCase):
         self.assertTrue(check_pose_orientation("right", 35.0))
         self.assertTrue(check_pose_orientation("right", 50.0))
         self.assertTrue(check_pose_orientation("right", 64.9))
-        self.assertFalse(check_pose_orientation("right", 20.0))   # too centered
+        self.assertFalse(check_pose_orientation("right", 5.0))    # too centered
         self.assertFalse(check_pose_orientation("right", 66.0))   # too far → profile
         self.assertFalse(check_pose_orientation("right", -35.0))  # wrong direction
 
@@ -60,6 +60,26 @@ class PoseOrientationGuidanceTests(unittest.TestCase):
         self.assertTrue(check_pose_orientation("right_profile", 80.0))
         self.assertFalse(check_pose_orientation("right_profile", 60.0))
         self.assertFalse(check_pose_orientation("right_profile", 30.0))
+
+    def test_profile_accepts_detected_profile_label_when_yaw_is_uncertain(self):
+        self.assertTrue(
+            check_pose_orientation(
+                "left_profile",
+                7.0,
+                detected_pose_label="left_profile",
+            )
+        )
+        self.assertTrue(
+            check_pose_orientation(
+                "right_profile",
+                -7.0,
+                detected_pose_label="right_profile",
+            )
+        )
+
+    def test_slight_right_accepts_moderate_positive_yaw(self):
+        self.assertTrue(check_pose_orientation("right", 13.4))
+        self.assertTrue(check_pose_orientation("left", -13.4))
 
     def test_get_pose_capture_feedback_no_face(self):
         feedback = get_pose_capture_feedback("front", {"face_count": 0})
